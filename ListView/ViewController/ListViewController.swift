@@ -100,6 +100,7 @@ open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIV
     viewModel.viewState
       .do(onNext: { _ in
         DispatchQueue.main.async { [weak self] in
+          
           if let refresh = self?.refreshControl, refresh.isRefreshing {
             refresh.endRefreshing()
           }
@@ -110,8 +111,18 @@ open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIV
         result.mutate { $0.old = $0.new; $0.new = newValue }
       })
       .observeOn(MainScheduler.asyncInstance)
-      .subscribe(onNext: { [weak self] _ in
-        self?.adapter.performUpdates(animated: true, completion: nil)
+      .subscribe(onNext: { [weak self] state in
+        self?.adapter.performUpdates(animated: true, completion: { [weak self] completed in
+          guard
+            completed,
+            collectionView.contentSize.height < collectionView.frame.height,
+            let newState = state.new,
+            newState.displayType == .loadmore
+          else { return }
+          
+          // manual trigger load more on short list
+          self?.viewModel.command.accept(.loadMoreItems)
+        })
       })
       .disposed(by: viewModel.disposeBag)
   }
