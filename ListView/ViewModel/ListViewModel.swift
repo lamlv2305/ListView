@@ -38,6 +38,13 @@ open class ListViewModel<T: ListDiffable> {
     renewSubscription()
   }
   
+  public func item(at index: Int) -> T {
+    guard viewState.value.items.count > index else {
+      fatalError("Out of range. We have \(viewState.value.items.count) items")
+    }
+    return viewState.value.items[index]
+  }
+  
   private func renewSubscription() {
     apiBag = DisposeBag()
     

@@ -18,11 +18,11 @@ fileprivate extension UIScrollView {
   
   func loadNextPageTrigger<T>(state: Driver<ListViewState<T>>) -> Signal<()> {
     return self.rx.contentOffset.asDriver()
-      .filter { [weak self] _ -> Bool in
-        guard let this = self else { return false }
-        return this.contentSize.height > 0
-      }
       .withLatestFrom(state)
+      .filter { state -> Bool in
+        let displayType: [ListViewDisplayType] = [.loadmore, .complete]
+        return state.shouldLoadNextPage && displayType.contains(state.displayType)
+      }
       .flatMap { [weak self] currentState -> Signal<()> in
         guard let this = self else { return Signal.never() }
         let shouldLoad = currentState.shouldLoadNextPage
@@ -35,22 +35,27 @@ fileprivate extension UIScrollView {
   }
 }
 
-open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIViewController {
+open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIViewController, ListAdapterDataSource {
   /**
    *  Rx Variables
    */
   public let disposeBag = DisposeBag()
-  
-  public let reloadData = PublishSubject<ListViewStateOrder<T>>()
   
   /**
    *  UI Variables
    */
   public lazy var refreshControl = UIRefreshControl()
   
+  public lazy var adapter: ListAdapter = {
+    let adapter = ListAdapter(updater: ListAdapterUpdater(), viewController: self)
+    adapter.dataSource = self
+    return adapter
+  }()
+  
   /**
    *  Internal
    */
+  
   public let viewModel: ViewModel
   
   // MARK: - Body functions
@@ -64,8 +69,14 @@ open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIV
     fatalError()
   }
   
-  public func prepareWith(scrollView: UIScrollView) {
-    scrollView.addSubview(refreshControl)
+  open override func viewDidLoad() {
+    super.viewDidLoad()
+  }
+  
+  public func prepareWith(_ collectionView: UICollectionView) {
+    adapter.collectionView = collectionView
+    
+    collectionView.addSubview(refreshControl)
     
     let refreshCommand = refreshControl.rx.controlEvent(.valueChanged)
       .flatMap { [weak self] _ -> Observable<ListViewCommand> in
@@ -77,7 +88,7 @@ open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIV
         return Observable.just(ListViewCommand.refresh)
       }
     
-    let loadMoreCommand = scrollView.loadNextPageTrigger(state: viewModel.viewState.asDriver())
+    let loadMoreCommand = collectionView.loadNextPageTrigger(state: viewModel.viewState.asDriver())
       .flatMapLatest { _ -> Signal<ListViewCommand> in
         Signal.just(ListViewCommand.loadMoreItems)
       }
@@ -98,7 +109,67 @@ open class ListViewController<T: ListDiffable, ViewModel: ListViewModel<T>>: UIV
       .scan(ListViewStateOrder<T>(), accumulator: { result, newValue -> ListViewStateOrder<T> in
         result.mutate { $0.old = $0.new; $0.new = newValue }
       })
-      .bind(to: reloadData)
+      .observeOn(MainScheduler.asyncInstance)
+      .subscribe(onNext: { [weak self] _ in
+        self?.adapter.performUpdates(animated: true, completion: nil)
+      })
       .disposed(by: viewModel.disposeBag)
+  }
+  
+  open func sectionController(for object: T) -> ListSectionController {
+    fatalError("You do not `override` this function yet.")
+  }
+  
+  open func sectionController(for loadmore: LoadMoreListDiffable) -> ListSectionController {
+    fatalError("You do not `override` this function yet.")
+  }
+  
+  open func emptyView(for displayType: ListViewDisplayType, frame: CGRect) -> UIView? {
+    return nil
+  }
+  
+  // MARK: - ListAdapterDataSource
+  
+  /*
+   
+   We should make this ListAdapterDataSource to a separate file or some kind of this.
+   But we can't extension generic swift class with @objc object, so just follow up with this way.
+   
+   */
+  
+  public final func objects(for listAdapter: ListAdapter) -> [ListDiffable] {
+    let availaleType: [ListViewDisplayType] = [.complete, .loadmore]
+    let viewState = viewModel.viewState.value
+    
+    guard
+      availaleType.contains(viewState.displayType),
+      viewState.items.count > 0
+    else { return [] }
+    
+    var current: [ListDiffable] = viewState.items
+    
+    if viewState.shouldLoadNextPage {
+      current.append(LoadMoreListDiffable())
+    }
+    
+    return current
+  }
+  
+  public final func listAdapter(_ listAdapter: ListAdapter, sectionControllerFor object: Any) -> ListSectionController {
+    if let obj = object as? LoadMoreListDiffable {
+      return sectionController(for: obj)
+    }
+    
+    if let obj = object as? T {
+      return sectionController(for: obj)
+    }
+    
+    fatalError("Check your object type. It does not valid: \(object)")
+  }
+  
+  public final func emptyView(for listAdapter: ListAdapter) -> UIView? {
+    guard let collectionView = listAdapter.collectionView else { return nil }
+    
+    return emptyView(for: viewModel.viewState.value.displayType, frame: collectionView.frame)
   }
 }
