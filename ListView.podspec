@@ -16,7 +16,7 @@ Pod::Spec.new do |spec|
   This project is in the early stage. DO NOT TRY TO USE THIS IN THE PRODUCTION APPLICATION.
                    DESC
   spec.license      = "MIT"
-  spec.author             = { "Luong Van Lam" => "lam.luongvan2305@gmail.com" }
+  spec.author       = { "Luong Van Lam" => "lam.luongvan2305@gmail.com" }
   spec.platform     = :ios, "9.0"
   spec.source       = { :git => "https://github.com/zoka2305/ListView.git", :tag => spec.version.to_s  }
 
